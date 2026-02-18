@@ -538,7 +538,206 @@ Future Enhancements
 
 **Your Solution for problem 4:**
 
-You need to put your solution here.
+## System Design
+
+The Character-Based Video Series Generator is designed as a job-driven, asset-centric backend system that ensures character consistency, efficient asset reuse, and scalable rendering workflows across episodic content generation.
+
+The architecture separates creative definitions (characters, relationships) from episodic production (episodes, scenes, render jobs) to support reuse, continuity, and cost-efficient scaling.
+
+### Core Components
+
+API Service
+
+Handles client operations including character creation, relationship management, episode generation requests, asset uploads, and artifact retrieval. The API layer validates inputs, enforces authorization, and persists metadata.
+
+Character Management Service
+
+Manages character definitions including visual references, traits, attributes, and identity metadata. Characters are defined once and reused across episodes.
+
+Episode Orchestrator
+
+Coordinates episodic generation workflows. Each episode is modeled as a series of asynchronous jobs including script generation, scene planning, asset selection, and rendering.
+
+Scene / Asset Planner
+
+Responsible for translating episode-level inputs into scene structures and determining required assets. This service ensures reuse of existing character assets where possible.
+
+Job Queue
+
+Decouples computationally heavy operations such as script generation, asset processing, and rendering from synchronous API requests. All long-running tasks are processed asynchronously.
+
+Worker / Render Services
+
+Consume jobs from the queue and execute tasks including media generation, asset transformations, video rendering, and artifact production.
+
+Object Storage
+
+Stores character images, audio assets, intermediate media, rendered videos, and artifacts. Object storage provides durability and scalability for large media files.
+
+Database (PostgreSQL)
+
+Stores relational metadata including characters, relationships, episodes, scenes, assets, render jobs, and artifacts.
+
+---
+
+## Episodic Pipeline as Jobs
+
+Each episode is processed via an asynchronous pipeline:
+
+1. Episode creation request received
+2. Script / story job triggered
+3. Scene breakdown job executed
+4. Asset resolution / reuse job
+5. RenderJob(s) scheduled
+6. Artifacts generated and stored
+7. Episode status updated
+
+This design ensures that failures or retries do not block user-facing operations.
+
+---
+
+## Database Schema Design
+
+Character
+
+- id (PK)
+- user_id (FK)
+- name
+- traits (JSON / text)
+- base_image_asset_id (FK → Asset)
+- created_at
+
+Relationship
+
+- id (PK)
+- character_a_id (FK → Character)
+- character_b_id (FK → Character)
+- relationship_type
+- metadata (JSON)
+
+Episode
+
+- id (PK)
+- user_id (FK)
+- title
+- status (queued / processing / completed / failed)
+- created_at
+
+Scene
+
+- id (PK)
+- episode_id (FK → Episode)
+- scene_index
+- description
+- created_at
+
+Asset
+
+- id (PK)
+- user_id (FK)
+- asset_type (image / audio / video / model)
+- storage_path
+- hash (for dedupe)
+- version
+- created_at
+
+RenderJob
+
+- id (PK)
+- episode_id (FK → Episode)
+- scene_id (FK → Scene)
+- status (queued / rendering / completed / failed)
+- created_at
+
+Artifact
+
+- id (PK)
+- render_job_id (FK → RenderJob)
+- artifact_type (video / preview / metadata)
+- storage_path
+- created_at
+
+---
+
+## Consistency Data Strategy
+
+To maintain character continuity across episodes, the system persists:
+
+- Character identity & traits
+- Canonical visual assets
+- Voice / style attributes (if applicable)
+- Relationship graph
+- Historical episode references
+
+Workers and planners always reference canonical character data rather than regenerating attributes.
+
+---
+
+## Storage & Asset Management Strategy
+
+- All media assets stored in object storage
+- Assets versioned to prevent accidental overwrites
+- Content-addressable hashing used for deduplication
+- Shared assets reused across scenes and episodes
+- Large artifacts stored separately from metadata
+
+Example structure:
+
+/storage/{user_id}/characters/{character_id}/v{n}
+/storage/{user_id}/episodes/{episode_id}/scenes/
+/storage/{user_id}/artifacts/
+
+---
+
+## Deduplication & Efficiency
+
+- Asset hashes detect duplicates
+- Previously generated character assets reused
+- Scene planners avoid redundant generation
+- Render cache possible for identical scenes
+
+This significantly reduces compute and storage costs.
+
+---
+
+## Security & Cost Controls
+
+- Per-user quotas for storage & rendering
+- Rate limits on generation requests
+- Maximum asset size constraints
+- Authorization checks on asset access
+- Safe download via signed URLs
+- Abuse prevention via job throttling
+
+---
+
+## Reliability & Failure Handling
+
+- Render jobs isolated per scene
+- Retry policies with exponential backoff
+- Idempotent job execution
+- Partial episode completion supported
+- Job state machine for observability
+- JobEvent logging for debugging
+
+---
+
+## Scalability & Evolution
+
+MVP
+
+- Central API + worker pool
+- PostgreSQL metadata store
+- Object storage for assets
+- Queue-based job execution
+
+Future Enhancements
+
+- Distributed render clusters
+- Smart asset caching
+- Cross-episode asset reuse optimization
+- Observability & metrics pipeline
+- Cost-aware scheduling policies
 
 ## Problem 5: Cross-Cutting
 
@@ -552,4 +751,86 @@ Answer briefly for the whole platform:
 
 **Your Answer for problem 5:**
 
-You need to put your solution here.
+## Multi-tenancy
+
+A workspace-level multi-tenancy model is preferred over pure user-level isolation. Users belong to one or more workspaces, enabling team collaboration and shared resources.
+
+Schema strategy:
+
+- workspace table as tenant boundary
+- user_workspace mapping for membership
+- All domain entities include workspace_id (FK)
+- Queries always scoped by workspace context
+
+This model supports scalability, collaboration, and clean data isolation.
+
+---
+
+## AuthZ Model
+
+A lightweight RBAC model is used.
+
+Roles (example):
+
+- owner
+- admin
+- member
+- viewer
+
+Enforcement layers:
+
+- API layer performs authorization checks
+- Database enforces ownership via workspace_id constraints
+- Sensitive operations require role validation
+
+This prevents cross-tenant data access and privilege escalation.
+
+---
+
+## Observability
+
+The platform logs structured, correlated events.
+
+Key elements:
+
+- correlation_id per request/job
+- job_id / entity_id references
+- lifecycle events (queued, processing, success, failed)
+- error metadata
+
+Minimal metrics:
+
+- job latency
+- failure rates
+- queue depth
+- retry counts
+
+This enables debugging, monitoring, and reliability analysis.
+
+---
+
+## Data Retention
+
+Retention policies differ by data type:
+
+- Temporary inputs (CSV/uploads) → short TTL
+- Generated artifacts → user-controlled lifecycle
+- Logs / JobEvents → longer retention for audits
+- Failed/intermediate artifacts → periodic cleanup
+
+Object storage lifecycle rules automate deletion where applicable.
+
+---
+
+## Secrets & Compliance
+
+Security practices include:
+
+- Token encryption at rest
+- Centralized key management (KMS / vault)
+- Secrets never hardcoded
+- Least-privilege access to credentials
+- PII minimized and access-controlled
+- Secure download via signed URLs
+
+This ensures regulatory safety and reduces breach impact.
