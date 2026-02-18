@@ -346,7 +346,181 @@ Future Enhancements
 
 **Your Solution for problem 3:**
 
-You need to put your solution here.
+## System Design
+
+The DOCX Template → Bulk DOCX/PDF Generator is designed as an asynchronous, storage-driven backend system that supports template ingestion, dynamic field extraction, single document generation, and large-scale bulk processing. The architecture prioritizes responsiveness, reliability, and safe file handling.
+
+### Core Components
+
+API Service
+
+Handles client interactions including template uploads, field inspection requests, single-fill exports, bulk job submissions, and artifact downloads. The API layer validates inputs, enforces authorization, and persists metadata.
+
+Template Ingestion Service
+
+Processes uploaded DOCX templates, performs format validation, stores raw templates in object storage, and triggers field extraction workflows.
+
+Field Extraction Service
+
+Parses templates to detect placeholders or merge fields. Extracted fields are normalized and stored for reuse. This service ensures templates are decoupled from document generation logic.
+
+Bulk Job Orchestrator
+
+Responsible for coordinating bulk runs initiated via CSV or sheet uploads. It creates BulkRun and BulkRow records, pushes jobs to the queue, and manages execution state.
+
+Job Queue
+
+Decouples heavy document generation tasks from user requests. Bulk processing, retries, and exports are executed asynchronously to avoid blocking API responses.
+
+Worker Services
+
+Consume queued jobs and perform document generation. Workers fetch templates, inject row-specific data, generate DOCX/PDF outputs, upload artifacts, and update row status.
+
+Export / Packaging Service
+
+Aggregates generated artifacts into ZIP archives and produces per-row reports. This service handles packaging logic separately from generation workflows.
+
+Object Storage
+
+Stores templates, generated documents, ZIP files, and reports. Object storage is chosen for scalability, durability, and efficient large file handling.
+
+Database (PostgreSQL)
+
+Stores relational metadata including templates, template versions, fields, bulk runs, row statuses, artifacts, and job events.
+
+---
+
+## Database Schema Design
+
+Template
+
+- id (PK)
+- user_id (FK)
+- name
+- created_at
+
+TemplateVersion
+
+- id (PK)
+- template_id (FK → Template)
+- storage_path
+- version_number
+- created_at
+
+TemplateField
+
+- id (PK)
+- template_version_id (FK → TemplateVersion)
+- field_name
+- field_type (text / number / date)
+- created_at
+
+BulkRun
+
+- id (PK)
+- template_version_id (FK)
+- status (queued / processing / completed / failed)
+- created_at
+
+BulkRow
+
+- id (PK)
+- bulk_run_id (FK → BulkRun)
+- row_index
+- status (pending / success / failed)
+- error_message (nullable)
+
+Artifact
+
+- id (PK)
+- bulk_row_id (FK → BulkRow)
+- artifact_type (docx / pdf / report)
+- storage_path
+- created_at
+
+JobEvent
+
+- id (PK)
+- bulk_run_id or bulk_row_id (FK)
+- event_type
+- event_time
+- metadata (JSON)
+
+---
+
+## Bulk Storage Strategy
+
+- Templates stored in object storage using versioned paths
+- CSV inputs stored temporarily with lifecycle policies
+- Generated DOCX/PDF artifacts stored per row
+- ZIP archives generated after completion
+- Cleanup policies remove temporary inputs and failed artifacts
+- Storage paths structured by user/tenant isolation
+
+Example:
+
+/storage/{user_id}/templates/{template_id}/v{n}
+/storage/{user_id}/bulk/{bulk_run_id}/row_{n}.pdf
+
+---
+
+## Reliability & Failure Handling
+
+- Bulk runs tracked independently from rows
+- Each row processed as an isolated unit of work
+- Partial success supported without aborting entire run
+- Failed rows retried with exponential backoff
+- Row-level status allows resumable bulk runs
+- Idempotent job execution prevents duplicate artifacts
+- Job events enable auditability and debugging
+
+---
+
+## Security Considerations
+
+- Template isolation per user or tenant
+- Strict authorization for template and artifact access
+- Safe download strategy via signed URLs
+- Anti-path traversal validation on file operations
+- Input validation for CSV/sheet uploads
+- No direct filesystem exposure
+- Malware scanning for uploaded templates (future enhancement)
+
+---
+
+## Processing Flow
+
+1. User uploads DOCX template
+2. Template ingestion validates and stores file
+3. Field extraction parses placeholders
+4. User performs single-fill or bulk upload
+5. BulkRun + BulkRow records created
+6. Jobs pushed to queue
+7. Workers generate documents per row
+8. Artifacts uploaded to storage
+9. ZIP + reports generated
+10. Final statuses updated
+
+---
+
+## Scalability & Evolution
+
+MVP
+
+- Single ingestion pipeline
+- Worker pool for generation
+- PostgreSQL metadata store
+- Object storage artifacts
+- Basic queue-based orchestration
+
+Future Enhancements
+
+- Parallel row processing optimization
+- Distributed worker clusters
+- Template caching layer
+- Streaming ZIP generation
+- Advanced retry / dead-letter queues
+- Observability & metrics pipeline
 
 ---
 
