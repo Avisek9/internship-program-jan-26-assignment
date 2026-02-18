@@ -26,7 +26,152 @@
 
 **Your Solution for problem 1:**
 
-You need to put your solution here.
+## System Design
+
+The system is designed using an asynchronous processing architecture to ensure that heavy video processing tasks do not block user requests and to allow horizontal scalability.
+
+### Core Components
+
+API Service
+
+Responsible for handling client requests including video uploads, authentication, validation, metadata persistence, and job creation.
+
+Object Storage
+
+Used for storing raw uploaded videos and generated artifacts such as transcripts, summaries, highlights, and screenshots. Object storage is selected for durability, scalability, and cost efficiency.
+
+PostgreSQL Database
+
+Stores relational metadata including users, video assets, jobs, artifacts, and highlights. PostgreSQL provides strong consistency, transactional safety, and schema enforcement.
+
+Job Queue
+
+Decouples user-facing operations from processing workloads. This ensures non-blocking API responses, retry capability, and independent scaling of workers.
+
+Worker Service(s)
+
+Consumes jobs from the queue and performs video processing. Workers download video assets, invoke external AI services, generate outputs, and update job states.
+
+External AI / Transcription Services
+
+Used for speech-to-text transcription, summarization, highlight extraction, and screenshot or clip inference.
+
+### Processing Flow
+
+1. User uploads video via API Service  
+2. API validates request and stores video in Object Storage  
+3. API creates VideoAsset record  
+4. API creates Job record with status = queued  
+5. Job is pushed to the queue  
+6. Worker consumes job asynchronously  
+7. Worker downloads video and invokes AI services  
+8. Outputs stored as artifacts and highlights  
+9. Job status updated to success or failed  
+
+This architecture ensures responsiveness, scalability, and failure isolation.
+
+---
+
+## DB Choice – PostgreSQL
+
+PostgreSQL is chosen because the data model is strongly relational, requiring structured relationships between users, videos, jobs, and artifacts. PostgreSQL provides strong consistency, transactional guarantees, schema constraints, and predictable query behavior.
+
+---
+
+## Schema Design
+
+User
+
+- id (Primary Key)  
+- email (Unique)  
+- created_at  
+
+VideoAsset
+
+- id (Primary Key)  
+- user_id (Foreign Key → User.id)  
+- storage_url  
+- status (uploaded / processing / ready)  
+- created_at  
+
+Job
+
+- id (Primary Key)  
+- video_id (Foreign Key → VideoAsset.id)  
+- type (transcription / summary / highlights)  
+- status (queued / processing / success / failed)  
+- retry_count  
+- created_at  
+
+JobEvent
+
+- id (Primary Key)  
+- job_id (Foreign Key → Job.id)  
+- event_type  
+- timestamp  
+- metadata (JSON)  
+
+Artifact
+
+- id (Primary Key)  
+- job_id (Foreign Key → Job.id)  
+- type (transcript / summary / screenshot)  
+- storage_url  
+- created_at  
+
+Highlight
+
+- id (Primary Key)  
+- video_id (Foreign Key → VideoAsset.id)  
+- start_time  
+- end_time  
+- label  
+
+---
+
+## Key Constraints / Indexes
+
+Constraints
+
+- UNIQUE(User.email)  
+- FK(VideoAsset.user_id → User.id)  
+- FK(Job.video_id → VideoAsset.id)  
+- FK(Artifact.job_id → Job.id)  
+
+Indexes
+
+- Index on Job.video_id  
+- Index on Job.status  
+- Index on Artifact.job_id  
+- Index on Highlight.video_id  
+
+These indexes optimize frequent lookup and job tracking operations.
+
+---
+
+## Job Lifecycle
+
+Jobs follow a simple state machine:
+
+queued → processing → success / failed
+
+Workers are designed to be idempotent, allowing safe retries without generating duplicate artifacts. Retries are controlled using retry_count with a capped limit.
+
+---
+
+## Storage Layout
+
+Artifacts are stored in object storage using structured paths:
+
+/videos/{video_id}/original.mp4  
+/videos/{video_id}/transcript.json  
+/videos/{video_id}/summary.md  
+/videos/{video_id}/highlights.json  
+/videos/{video_id}/screenshots/
+
+Safe Download Strategy
+
+Files are never publicly exposed. The API Service generates pre-signed URLs after validating user authorization. This prevents unauthorized access and reduces backend bandwidth usage.
 
 ---
 
