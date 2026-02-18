@@ -189,7 +189,146 @@ Files are never publicly exposed. The API Service generates pre-signed URLs afte
 
 **Your Solution for problem 2:**
 
-You need to put your solution here.
+## System Design
+
+The LinkedIn Automation Platform is designed as a secure, event-driven backend system that manages OAuth authentication, persona storage, content scheduling, and reliable posting workflows. The architecture separates user-facing operations from background automation tasks to ensure responsiveness, reliability, and scalability.
+
+### Core Components
+
+API Service
+
+Responsible for handling client requests including LinkedIn OAuth connection, persona management, draft approvals, scheduling operations, and configuration retrieval. The API layer performs validation, authentication, authorization, and persistence of metadata.
+
+OAuth / LinkedIn Integration Module
+
+Manages LinkedIn OAuth flow, token exchange, refresh handling, and API communication with LinkedIn services. Tokens are never exposed to clients and are securely stored after encryption.
+
+Database (PostgreSQL)
+
+Stores relational metadata including users, LinkedIn accounts, personas, drafts, schedules, and posting logs. PostgreSQL is selected due to strong consistency guarantees, transactional safety, indexing flexibility, and suitability for relational workflows.
+
+Job Queue
+
+Decouples scheduling and posting operations from synchronous API requests. Posting tasks, retries, and delayed executions are handled asynchronously through queued jobs.
+
+Worker Services
+
+Consume jobs from the queue and perform automated actions such as scheduled posting, retry processing, rate limit handling, and audit logging. Workers ensure fault tolerance and controlled execution.
+
+Configuration / Prompt Store
+
+Stores prompt versions or configuration packs provided by the GenAI team. Versioning enables controlled rollouts, reproducibility, and rollback capabilities.
+
+---
+
+## OAuth Flow & Token Management
+
+Users authenticate via LinkedIn OAuth. The backend exchanges authorization codes for access and refresh tokens. Tokens are encrypted before storage and refreshed automatically by the integration module when required.
+
+Tokens are never stored in plaintext and never sent back to the client after initial authorization.
+
+---
+
+## Database Schema Design
+
+User
+
+- id (PK)
+- email (unique)
+- created_at
+
+LinkedInAccount
+
+- id (PK)
+- user_id (FK → User)
+- linkedin_user_id (unique)
+- encrypted_access_token
+- encrypted_refresh_token
+- token_expiry
+
+Persona
+
+- id (PK)
+- user_id (FK → User)
+- profile_data (JSON / text)
+- created_at
+
+Draft
+
+- id (PK)
+- user_id (FK → User)
+- content
+- status (pending / approved / rejected)
+- created_at
+
+Schedule
+
+- id (PK)
+- draft_id (FK → Draft)
+- scheduled_time
+- status (queued / posted / failed)
+
+PostAttempt / PostLog
+
+- id (PK)
+- schedule_id (FK → Schedule)
+- attempt_time
+- status
+- error_message (nullable)
+
+---
+
+## Security Considerations
+
+- OAuth tokens are encrypted at rest
+- Least-privilege OAuth scopes enforced
+- Strict access control per user
+- No token exposure to frontend
+- Sensitive data stored separately from logs
+- Secure secret management via environment or vault
+
+---
+
+## Reliability & Failure Handling
+
+- Posting operations executed via workers
+- Automatic retries with exponential backoff
+- Idempotency keys prevent duplicate posts
+- Deduplication logic ensures single execution
+- Rate limiting safeguards API usage
+- Job status tracking for observability
+
+---
+
+## Prompt / Configuration Storage Strategy
+
+A hybrid approach is used:
+
+- Database stores active prompt/config metadata and versions
+- Repository or object storage holds large/static config packs
+- Version identifiers ensure reproducibility
+- Rollback achieved via version switching
+
+This approach balances performance, auditability, and operational flexibility.
+
+---
+
+## Scalability & Evolution
+
+MVP
+
+- Single API service
+- Background worker pool
+- PostgreSQL database
+- Simple job queue
+
+Future Enhancements
+
+- Distributed worker scaling
+- Advanced scheduling engine
+- Multi-account automation
+- Observability & metrics pipeline
+- Feature flags for prompt rollout
 
 ---
 
